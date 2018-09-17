@@ -28,25 +28,18 @@ main =
 
 
 type Msg
-    = OpenWindow Point Point
+    = OpenWindow Point
     | CloseWindow
-    | MousePosition Point Point
+    | MousePosition Point
 
 
 type alias Point =
-    Float
-
-
-fromPoint : Point -> String
-fromPoint =
-    fromFloat
+    { x : Float, y : Float }
 
 
 type alias CommandWindow =
-    { centerX : Point
-    , centerY : Point
-    , mouseX : Point
-    , mouseY : Point
+    { center : Point
+    , mouse : Point
     }
 
 
@@ -68,16 +61,18 @@ subscription model =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        OpenWindow x y ->
-            ( { model | commandWindow = Just <| CommandWindow x y x y }, Cmd.none )
+        OpenWindow circlePoint ->
+            ( { model | commandWindow = Just <| CommandWindow circlePoint circlePoint }
+            , Cmd.none
+            )
 
         CloseWindow ->
             ( { model | commandWindow = Nothing }, Cmd.none )
 
-        MousePosition x y ->
+        MousePosition pos ->
             case model.commandWindow of
                 Just currentCmd ->
-                    ( { model | commandWindow = Just { currentCmd | mouseX = x, mouseY = y } }
+                    ( { model | commandWindow = Just { currentCmd | mouse = pos } }
                     , Cmd.none
                     )
 
@@ -85,18 +80,18 @@ update msg model =
                     ( model, Cmd.none )
 
 
-mouseDecoder : (Point -> Point -> a) -> Decoder a
+mouseDecoder : (Point -> a) -> Decoder a
 mouseDecoder f =
-    map2 f (field "clientX" float) (field "clientY" float)
+    map2 (\x y -> Point x y |> f) (field "clientX" float) (field "clientY" float)
 
 
-onMouseDown : (Point -> Point -> msg) -> Html.Attribute msg
-onMouseDown f =
+onMouseDownWithPoint : (Point -> Msg) -> Html.Attribute Msg
+onMouseDownWithPoint f =
     on "mousedown" <| mouseDecoder f
 
 
 
--- 引数は 0 ~ 360 であること
+-- 引数は 0 ~ 2pi であること
 
 
 angleDistant : Float -> Float -> Float
@@ -106,23 +101,35 @@ angleDistant a b =
             a - b |> abs
 
         y =
-            a - b + 360 |> abs
+            a - b + 2 * pi |> abs
     in
     Basics.min x y
 
 
-toDegree : Float -> Float
-toDegree =
-    (*) 180 >> (\x -> x / pi)
-
-
-absDegree : Float -> Float
-absDegree a =
+absAngle : Float -> Float
+absAngle a =
     if a < 0 then
-        a + 360
+        a + 2 * pi |> absAngle
 
     else
         a
+
+
+
+{-
+   12時を0とし、時計回りに計算する角度から、3時を0とし、反時計回りに計算する角度に変換する
+   radianを受け取ることを前提とする
+-}
+
+
+fromTopBasedAngle : Float -> Float
+fromTopBasedAngle float =
+    pi / 2 - float |> absAngle
+
+
+circleRadius : Float
+circleRadius =
+    100
 
 
 drawCircle : Model -> List String -> Html Msg
@@ -134,30 +141,25 @@ drawCircle model entities =
         Just c ->
             let
                 interval =
-                    360 / (entities |> List.length |> toFloat)
+                    2 * pi / (entities |> List.length |> toFloat)
 
                 elemAndAngle =
-                    List.indexedMap (\i e -> ( toFloat i * interval, e )) entities
+                    List.indexedMap (\i e -> ( toFloat i * interval |> fromTopBasedAngle, e )) entities
 
                 distantX =
-                    c.mouseX - c.centerX
+                    c.mouse.x - c.center.x
 
+                -- SVGの座標系は上部を0とするため反転させる
                 distantY =
-                    c.mouseY - c.centerY |> (*) -1
+                    c.mouse.y - c.center.y |> (*) -1
 
-                angleRad =
-                    atan2 distantY distantX
-
-                angleDegree =
-                    angleRad |> toDegree
-
-                topBasedAngleDegree =
-                    90 - angleDegree |> absDegree |> Debug.log "topBasedAngleDegree"
+                angle =
+                    atan2 distantY distantX |> absAngle |> Debug.log "angle"
 
                 folder ( angleE, nameE ) ( distantA, nameA, angleA ) =
                     let
                         currentDistant =
-                            angleDistant angleE topBasedAngleDegree
+                            angleDistant angleE angle
                     in
                     if currentDistant > distantA then
                         ( distantA, nameA, angleA )
@@ -166,28 +168,32 @@ drawCircle model entities =
                         ( currentDistant, nameE, angleE )
 
                 ( _, closestName, closestAngle ) =
-                    List.foldr folder ( 400, "dummy", 34 ) elemAndAngle
+                    case elemAndAngle of
+                        ( headAngle, headName ) :: tailElem ->
+                            List.foldr folder
+                                ( angleDistant headAngle angle, headName, headAngle )
+                                tailElem
 
-                closestAngle2 =
-                    90 - closestAngle |> degrees
+                        _ ->
+                            ( 0, "no element", 0 )
 
-                pointX =
-                    cos closestAngle2 |> (*) 100 |> (+) c.centerX
+                lineEndX =
+                    cos closestAngle |> (*) circleRadius |> (+) c.center.x
 
-                pointY =
-                    sin closestAngle2 |> (*) -100 |> (+) c.centerY
+                lineEndY =
+                    sin closestAngle |> (*) circleRadius |> negate |> (+) c.center.y
             in
             svg []
                 [ circle
-                    [ cx <| fromPoint c.centerX
-                    , cy <| fromPoint c.centerY
+                    [ cx <| fromFloat c.center.x
+                    , cy <| fromFloat c.center.y
                     , r "100"
                     , fill "gray"
                     ]
                     []
                 , text_
-                    [ x <| fromPoint c.centerX
-                    , y <| fromPoint <| c.centerY + 130
+                    [ x <| fromFloat c.center.x
+                    , y <| fromFloat <| c.center.y + 130
                     ]
                     [ Svg.text closestName ]
 
@@ -199,10 +205,10 @@ drawCircle model entities =
                        [ Svg.text <| "angle: " ++ fromFloat angle3 ]
                 -}
                 , line
-                    [ x1 <| fromFloat c.centerX
-                    , y1 <| fromFloat c.centerY
-                    , x2 <| fromFloat pointX
-                    , y2 <| fromFloat pointY
+                    [ x1 <| fromFloat c.center.x
+                    , y1 <| fromFloat c.center.y
+                    , x2 <| fromFloat lineEndX
+                    , y2 <| fromFloat lineEndY
                     , strokeWidth <| String.fromInt 10
                     , stroke "black"
                     ]
@@ -215,5 +221,9 @@ elems =
 
 
 view model =
-    div [ Html.Attributes.id "main", onMouseDown OpenWindow, onMouseUp CloseWindow ]
+    div
+        [ Html.Attributes.id "main"
+        , onMouseDownWithPoint OpenWindow
+        , onMouseUp CloseWindow
+        ]
         [ drawCircle model elems ]
