@@ -111,6 +111,20 @@ angleDistant a b =
     Basics.min x y
 
 
+toDegree : Float -> Float
+toDegree =
+    (*) 180 >> (\x -> x / pi)
+
+
+absDegree : Float -> Float
+absDegree a =
+    if a < 0 then
+        a + 360
+
+    else
+        a
+
+
 drawCircle : Model -> List String -> Html Msg
 drawCircle model entities =
     case model.commandWindow of
@@ -134,23 +148,16 @@ drawCircle model entities =
                 angleRad =
                     atan2 distantY distantX
 
-                angle =
-                    angleRad |> (*) 180 |> (\x -> x / pi)
+                angleDegree =
+                    angleRad |> toDegree
 
-                angle2 =
-                    90 - angle
-
-                angle3 =
-                    if angle2 < 0 then
-                        angle2 + 360
-
-                    else
-                        angle2
+                topBasedAngleDegree =
+                    90 - angleDegree |> absDegree |> Debug.log "topBasedAngleDegree"
 
                 folder ( angleE, nameE ) ( distantA, nameA, angleA ) =
                     let
                         currentDistant =
-                            angleDistant angleE angle3
+                            angleDistant angleE topBasedAngleDegree
                     in
                     if currentDistant > distantA then
                         ( distantA, nameA, angleA )
